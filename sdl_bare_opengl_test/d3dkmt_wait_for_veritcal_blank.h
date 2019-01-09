@@ -31,5 +31,7 @@ struct D3DKMTWFVB_STATE
 };
 
 
+typedef LONG NTSTATUS;
+
 extern NTSTATUS d3dkmt_wait_for_vertical_blank_init(struct D3DKMTWFVB_STATE *state);
 extern NTSTATUS d3dkmt_wait_for_vertical_blank(struct D3DKMTWFVB_STATE *state);

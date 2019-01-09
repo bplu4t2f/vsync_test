@@ -13,6 +13,10 @@
 #include <dwmapi.h>
 #include <limits>
 
+#define PERFCMS_IMPLEMENTATION
+#include "perfcms.h"
+
+
 
 extern "C"
 {
@@ -29,9 +33,13 @@ static int sdl_rotate();
 
 #include <sstream>
 
+#include "sformat.h"
+
+
 
 int main(int argc, char **argv)
 {
+	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	main_d3d11();
 }
 
@@ -146,12 +154,17 @@ static SDL_Window *window;
 
 int main_opengl()
 {
+	Uint64 sw;
+
+	sw = SDL_GetPerformanceCounter();
 	if (SDL_Init(SDL_INIT_VIDEO) != 0)
 	{
 		printf("sdl init failed %s\n", SDL_GetError());
 		//return 1;
 	}
+	printf("SDL_Init OK: %lf\n", get_elapsed_ms(sw));
 
+	sw = SDL_GetPerformanceCounter();
 #if 0
 	// This block seems to have no effect on the problem
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
@@ -175,22 +188,27 @@ int main_opengl()
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 #endif
+	printf("gl attribute garbage OK: %lf\n", get_elapsed_ms(sw));
 
+	sw = SDL_GetPerformanceCounter();
 	window = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
 	if (window == NULL)
 	{
 		printf("window failed %s\n", SDL_GetError());
 		return 1;
 	}
+	printf("SDL_CreateWindow OK: %lf\n", get_elapsed_ms(sw));
 
 	//SDL_SetWindowFullscreen(window, 1);
 
+	sw = SDL_GetPerformanceCounter();
 	context = SDL_GL_CreateContext(window);
 	if (context == NULL)
 	{
 		printf("context failed %s\n", SDL_GetError());
 		return 1;
 	}
+	printf("SDL_GL_CreateContext OK: %lf\n", get_elapsed_ms(sw));
 
 #if 0
 	glewExperimental = GL_TRUE;
@@ -212,11 +230,13 @@ int main_opengl()
 
 #if 1
 	// "Enable vsync"
+	sw = SDL_GetPerformanceCounter();
 	if (SDL_GL_SetSwapInterval(1) != 0)
 	{
 		printf("set swap interval failed %s\n", SDL_GetError());
 		return 1;
 	}
+	printf("SDL_GL_SetSwapInterval OK: %lf\n", get_elapsed_ms(sw));
 #endif
 
 #if 0
@@ -226,8 +246,6 @@ int main_opengl()
 		//return 1;
 	}
 #endif
-
-	printf("Init OK\r\n");
 
 	//SDL_CreateThread(ThreadProc, "thethread", NULL);
 
@@ -268,6 +286,7 @@ int main_opengl()
 
 	//make_dummy_window(window);
 	
+	sw = SDL_GetPerformanceCounter();
 	GLsync (APIENTRY *glFenceSync)(int, int) = (GLsync(APIENTRY *)(int, int)) wglGetProcAddress("glFenceSync");
 	if (glFenceSync == nullptr)
 	{
@@ -291,6 +310,7 @@ int main_opengl()
 	{
 		printf("glWaitSync doesn't exist.");
 	}
+	printf("fence shit OK: %lf\n", get_elapsed_ms(sw));
 
 	
 
@@ -569,11 +589,11 @@ int main_opengl()
 				//printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
 			}
 		}
-		GLsync gl_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-		if (gl_sync == 0)
-		{
-			printf("glFenceSync failed: %d\n", glGetError());
-		}
+		//GLsync gl_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		//if (gl_sync == 0)
+		//{
+		//	printf("glFenceSync failed: %d\n", glGetError());
+		//}
 		if (enable_glFinish || glFinishOnce)
 		{
 			Uint64 sw = SDL_GetPerformanceCounter();
@@ -590,19 +610,19 @@ int main_opengl()
 				printf("glFinish call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 			}
 		}
-		if (enableGlClientWaitSync)
-		{
-			Uint64 sw = SDL_GetPerformanceCounter();
-			glClientWaitSync(gl_sync, 0, GL_TIMEOUT_IGNORED);
-			Uint64 after = SDL_GetPerformanceCounter();
-			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
-			double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
-			//if (frame_counter < 15)
-			{
-				printf("glClientWaitSync call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
-			}
-		}
-		glDeleteSync(gl_sync);
+		//if (enableGlClientWaitSync)
+		//{
+		//	Uint64 sw = SDL_GetPerformanceCounter();
+		//	glClientWaitSync(gl_sync, 0, GL_TIMEOUT_IGNORED);
+		//	Uint64 after = SDL_GetPerformanceCounter();
+		//	double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
+		//	double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
+		//	//if (frame_counter < 15)
+		//	{
+		//		printf("glClientWaitSync call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
+		//	}
+		//}
+		//glDeleteSync(gl_sync);
 		if (false)
 		{
 			Uint64 sw = SDL_GetPerformanceCounter();

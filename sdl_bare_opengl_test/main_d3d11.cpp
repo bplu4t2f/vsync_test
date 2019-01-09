@@ -8,6 +8,8 @@
 #include <dwmapi.h>
 #include <limits>
 
+#include "perfcms.h"
+
 
 // DirectX
 #include <d3d11.h>
@@ -25,6 +27,11 @@ static void CleanD3D();
 void RenderFrame(int mouse_x, int mouse_y);     // renders a single frame
 void InitGraphics(void);    // creates the shape to render
 void InitPipeline(void);    // loads and prepares the shaders
+
+extern "C"
+{
+#include "d3dkmt_wait_for_veritcal_blank.h"
+}
 
 // global declarations
 static IDXGISwapChain *swapchain;             // the pointer to the swap chain interface
@@ -80,34 +87,38 @@ static VERTEX OurVertices[3];
 
 int main_d3d11()
 {
+	Uint64 sw;
+
+	D3DKMTWFVB_STATE d3dkmtbleh;
+	d3dkmt_wait_for_vertical_blank_init(&d3dkmtbleh);
+
+	sw = SDL_GetPerformanceCounter();
 	if (SDL_Init(SDL_INIT_VIDEO) != 0)
 	{
 		printf("sdl init failed %s\n", SDL_GetError());
-		//return 1;
+		return 1;
 	}
+	printf("SDL_Init OK %lf\n", get_elapsed_ms(sw));
 
+	sw = SDL_GetPerformanceCounter();
 	SDL_Window *window = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_w, window_h, SDL_WINDOW_SHOWN);
 	if (window == NULL)
 	{
 		printf("window failed %s\n", SDL_GetError());
 		return 1;
 	}
-
+	printf("SDL_CreateWindow OK %lf\n", get_elapsed_ms(sw));
+	
+	sw = SDL_GetPerformanceCounter();
 	if (!InitD3D(get_hwnd(window)))
 	{
 		printf("d3d init failed\n");
 		return 1;
 	}
-
-
-
-
-
-	printf("Init OK\r\n");
+	printf("InitD3D OK %lf\n", get_elapsed_ms(sw));
 
 	int frame_counter = 0;
 
-	Uint64 performance_frequency = SDL_GetPerformanceFrequency();
 	Uint64 last_tick = SDL_GetPerformanceCounter();
 	Uint64 performance_start = last_tick;
 
@@ -123,6 +134,14 @@ int main_d3d11()
 	bool skip_next_wait = false;
 	int record_next_wait = 0;
 	bool wait_extra_next_time = false;
+	bool capture = true;
+
+	int wait_counter = 0;
+	int present_counter = 0;
+
+	bool one_dwm_flush = false;
+	int dwm_flush_protection = 0;
+	int dwm_flush_soon = 0;
 
 	while (1)
 	{
@@ -138,40 +157,48 @@ int main_d3d11()
 		{
 			int bleh = 0;
 
-			Uint64 sw = SDL_GetPerformanceCounter();
+			sw = SDL_GetPerformanceCounter();
 			DWORD result = WaitForSingleObjectEx(
 				frameLatencyWaitableObject,
 				1000, // 1 second timeout (shouldn't ever occur)
 				true
 			);
+			++wait_counter;
 			if (wait_extra_next_time)
 			{
 				wait_extra_next_time = false;
-				Uint64 sw = SDL_GetPerformanceCounter();
+				sw = SDL_GetPerformanceCounter();
 				DWORD result = WaitForSingleObjectEx(
 					frameLatencyWaitableObject,
 					1000, // 1 second timeout (shouldn't ever occur)
 					true
 				);
+				++wait_counter;
 				record_next_wait = 5;
 			}
 			//vsyncThread(NULL);
-			Uint64 after = SDL_GetPerformanceCounter();
+			double waited = get_elapsed_ms(sw);
 
-			while (WaitForSingleObjectEx(frameLatencyWaitableObject, 0, true) == WAIT_OBJECT_0)
+			if (frame_counter < 15 || waited < 14.0 || waited > 18.0)
 			{
-				++bleh;
-			}
-			if (bleh > 0)
-			{
-				DWORD result = WaitForSingleObjectEx(
-					frameLatencyWaitableObject,
-					1000, // 1 second timeout (shouldn't ever occur)
-					true
-				);
+				printf("%d waited for long %lf\n", frame_counter, waited);
 			}
 
-			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
+			//while (WaitForSingleObjectEx(frameLatencyWaitableObject, 0, true) == WAIT_OBJECT_0)
+			//{
+			//	++bleh;
+			//}
+			//if (bleh > 0)
+			//{
+			//	printf("bleh\n");
+			//	DWORD result = WaitForSingleObjectEx(
+			//		frameLatencyWaitableObject,
+			//		1000, // 1 second timeout (shouldn't ever occur)
+			//		true
+			//	);
+			//}
+
+			double elapsed_ms = get_elapsed_ms(sw);
 			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
 			if (record_next_wait > 0)
 			{
@@ -185,15 +212,30 @@ int main_d3d11()
 			}
 		}
 
+		sw = SDL_GetPerformanceCounter();
 		mouse_x = (frame_counter * 8) % window_w;
-		if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS)
+		if (capture && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
 		{
 			SDL_WarpMouseInWindow(window, mouse_x, window_h / 2);
+			double elapsed = get_elapsed_ms(sw);
+			if (elapsed > 20.0) {
+				printf("set mouse cursor bleh %lf\n", elapsed);
+			}
 		}
 
+		sw = SDL_GetPerformanceCounter();
 		SDL_Event event;
-		while (SDL_PollEvent(&event))
+		while (true)
 		{
+			Uint64 sw2 = SDL_GetPerformanceCounter();
+			if (!SDL_PollEvent(&event)) {
+				break;
+			}
+			double elapsed = get_elapsed_ms(sw2);
+			if (elapsed > 5.0) {
+				printf("poll event: %lf\n", elapsed);
+			}
+
 			if (event.type == SDL_QUIT)
 			{
 				goto _quit;
@@ -225,8 +267,16 @@ int main_d3d11()
 				}
 				mouse_y = event.motion.y;
 			}
+			else if (event.type == SDL_WINDOWEVENT)
+			{
+				printf("windowevent\n");
+			}
 			else if (event.type == SDL_KEYDOWN)
 			{
+				if (event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+				{
+					capture = !capture;
+				}
 				if (event.key.keysym.scancode == SDL_SCANCODE_Q)
 				{
 					goto _quit;
@@ -234,6 +284,10 @@ int main_d3d11()
 				else if (event.key.keysym.scancode == SDL_SCANCODE_X)
 				{
 					skip_next_wait = true;
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_TAB)
+				{
+					printf("tab\n");
 				}
 				else if (event.key.keysym.scancode == SDL_SCANCODE_E)
 				{
@@ -263,6 +317,10 @@ int main_d3d11()
 				{
 					drop_a_few = true;
 				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_A)
+				{
+					one_dwm_flush = true;
+				}
 				else if (event.key.keysym.scancode == SDL_SCANCODE_F5)
 				{
 					present = true;
@@ -271,35 +329,46 @@ int main_d3d11()
 				{
 					present = false;
 				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_M)
+				{
+					printf(" ---------- marker\n");
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_B)
+				{
+					printf("--------- going to barely miss frame\n");
+					Sleep(20);
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_Z)
+				{
+					OutputDebugStringA("SCANCODE Z\n");
+				}
+				if (event.key.keysym.sym == 'z')
+				{
+					OutputDebugStringA("KEYCODE 'z'\n");
+				}
 			}
 		}
-
+		{
+			double elapsed = get_elapsed_ms(sw);
+			if (elapsed > 20.0) {
+				printf("%d events %lf\n", frame_counter, elapsed);
+			}
+		}
 		
 
 		
 		++frame_counter;
 		//printf("frame: %d\r\n", frame_counter);
 
-		double frame_counter_float;
-		Uint64 milli_frame_counter;
-
 		{
 			Uint64 tmp = last_tick;
 			last_tick = SDL_GetPerformanceCounter();
 			Uint64 elapsed = last_tick - tmp;
-			double elapsed_ms = (double)elapsed * 1000.0 / (double)performance_frequency;
-			if (elapsed_ms < 15.0 || elapsed_ms > 16.8)
+			double elapsed_ms = make_ms(elapsed);
+			if (elapsed_ms < 15.0 || elapsed_ms > 20.0)
 			{
 				printf("A %d : %.3lf\r\n", frame_counter, elapsed_ms);
 			}
-
-			Uint64 total_elapsed_ms = ((last_tick - performance_start) * 1000ULL + performance_frequency / 2) / performance_frequency;
-#define MONITOR_REFRESH_RATE_HZ 60
-			//frame_counter = (total_elapsed_ms * MONITOR_REFRESH_RATE_HZ + 500) / 1000;
-
-			Uint64 total_elapsed_us = ((last_tick - performance_start) * 1000000ULL + performance_frequency / 2) / performance_frequency;
-			milli_frame_counter = (total_elapsed_us * MONITOR_REFRESH_RATE_HZ + 500) / 1000;
-			frame_counter_float = (double)milli_frame_counter / 1000.0;
 		}
 
 
@@ -310,6 +379,7 @@ int main_d3d11()
 
 #if 1
 
+		sw = SDL_GetPerformanceCounter();
 		// set the render target as the back buffer
 		devcon->OMSetRenderTargets(1, &backbuffer, NULL);
 
@@ -328,8 +398,14 @@ int main_d3d11()
 			float color[4] = { 0, 0, 0, 0 };
 			devcon->ClearRenderTargetView(backbuffer, color);
 		}
+		{
+			double tmp = get_elapsed_ms(sw);
+			if (tmp > 20.0) {
+				printf("clear and setup failed %lf\n", tmp);
+			}
+		}
 
-
+		sw = SDL_GetPerformanceCounter();
 		// Flashing rectangle row
 		{
 			int row_index = frame_counter % ARRAYSIZE(rows);
@@ -371,18 +447,106 @@ int main_d3d11()
 
 			// draw the vertex buffer to the back buffer
 			devcon->Draw(3, 0);
+
+			double elapsed = get_elapsed_ms(sw);
+			if (elapsed > 20.0) {
+				printf("draw failed %lf\n", elapsed);
+			}
+		}
+
+		if (dwm_flush_soon > 0)
+		{
+			if (--dwm_flush_soon == 0)
+			{
+				one_dwm_flush = true;
+			}
+		}
+
+		//bool was_flushing = false;
+		if (one_dwm_flush)
+		{
+			one_dwm_flush = false;
+			//was_flushing = true;
+			sw = SDL_GetPerformanceCounter();
+			DwmFlush();
+			//vsyncThread(NULL);
+			double elapsed_ms = get_elapsed_ms(sw);
+			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
+			//if (frame_counter < 6000)
+		
+		
+			printf("ONE DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
+		}
+
+		static UINT last_present_count = 998789;
+		static UINT last_present_refresh_count = 9409588;
+
+		DXGI_FRAME_STATISTICS frame_stats;
+		swapchain->GetFrameStatistics(&frame_stats);
+		//printf("%d frame stats %u %u %u\n", frame_counter, frame_stats.PresentCount, frame_stats.PresentRefreshCount, frame_stats.SyncRefreshCount);
+		if (dwm_flush_protection == 0)
+		{
+			if (frame_counter > 5 && last_present_count == frame_stats.PresentCount)
+			{
+				printf("%d we shouldn't be here %u %u\n", frame_counter, last_present_count, frame_stats.PresentCount);
+				dwm_flush_soon = 16;
+				dwm_flush_protection = 20;
+				//wait_extra_next_time = true;
+			}
+			if (frame_counter > 5 && last_present_refresh_count == frame_stats.PresentRefreshCount)
+			{
+				printf("%d we shouldn't be here2 %u %u\n", frame_counter, last_present_refresh_count, frame_stats.PresentRefreshCount);
+				dwm_flush_soon = 16;
+				dwm_flush_protection = 20;
+				//wait_extra_next_time = true;
+			}
+		}
+		else
+		{
+			--dwm_flush_protection;
+		}
+
+		//if (one_dwm_flush)
+		//{
+		//	while (true)
+		//	{
+		//		DXGI_FRAME_STATISTICS frame_stats;
+		//		swapchain->GetFrameStatistics(&frame_stats);
+		//		if (frame_stats.PresentRefreshCount != last_present_refresh_count)
+		//		{
+		//			printf("it should have repaired itself again: %u\n", frame_stats.PresentRefreshCount);
+		//			break;
+		//		}
+		//	}
+		//	one_dwm_flush = false;
+		//}
+
+		last_present_count = frame_stats.PresentCount;
+		last_present_refresh_count = frame_stats.PresentRefreshCount;
+
+		if (frame_counter < 15) {
+			printf("%u %u\n", last_present_count, last_present_refresh_count);
 		}
 
 		if (present)
 		{
-			Uint64 sw = SDL_GetPerformanceCounter();
-			swapchain->Present(1, 0);
-			Uint64 after = SDL_GetPerformanceCounter();
-			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
-			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
-			//if (frame_counter < 60)
+			sw = SDL_GetPerformanceCounter();
+			HRESULT result = swapchain->Present(1, 0);
+			if (FAILED(result))
 			{
-				//printf("swap call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
+				printf("present failed %u\n", result);
+			}
+			UINT last_present_count;
+			swapchain->GetLastPresentCount(&last_present_count);
+			if (last_present_count != wait_counter)
+			{
+				printf("wtf\n");
+			}
+			double elapsed_ms = get_elapsed_ms(sw);
+			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
+			if (frame_counter < 15 || elapsed_ms > 1.0)
+			{
+				printf("swap call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 			}
 			if (frame_counter < 60)
 			{
@@ -391,18 +555,22 @@ int main_d3d11()
 		}
 		if (enable_dwm_flush)
 		{
-			Uint64 sw = SDL_GetPerformanceCounter();
+			sw = SDL_GetPerformanceCounter();
 			DwmFlush();
 			//vsyncThread(NULL);
-			Uint64 after = SDL_GetPerformanceCounter();
-			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
+			double elapsed_ms = get_elapsed_ms(sw);
 			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
 			//if (frame_counter < 6000)
+
+
+			if (elapsed_ms < 15.0 || elapsed_ms > 18.0)
 			{
-				//printf("DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
+				printf("DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 				//printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
 			}
 		}
+		//d3dkmt_wait_for_vertical_blank(&d3dkmtbleh);
+
 
 		if (drop_a_few)
 		{
@@ -484,6 +652,8 @@ bool InitD3D(HWND hWnd)
 		return false;
 	}
 
+	// some testing -- this affects FLIP_SEQUENTIAL (only WITHOUT DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT),
+	// but not normal SEQUENTIAL or DISCARD. is important for FLIP_SEQUENTIAL because the default is 3
 	IDXGIDevice1 *dev1;
 	hr = dev->QueryInterface(__uuidof(IDXGIDevice1), (void **)&dev1);
 	if (FAILED(hr))
@@ -495,7 +665,7 @@ bool InitD3D(HWND hWnd)
 	UINT retrieved;
 	dev1->GetMaximumFrameLatency(&retrieved);
 	printf("retrieved: %d\n", retrieved);
-	hr = dev1->SetMaximumFrameLatency(5);
+	hr = dev1->SetMaximumFrameLatency(1);
 	if (FAILED(hr))
 	{
 		_com_error err(hr);
@@ -535,19 +705,26 @@ bool InitD3D(HWND hWnd)
 		return false;
 	}
 
-	hr = sc2->SetMaximumFrameLatency(1);
-	if (FAILED(hr))
-	{
-		_com_error err(hr);
-		MessageBox(NULL, err.ErrorMessage(), NULL, MB_OK);
-		return false;
-	}
+	//DXGI_SWAP_CHAIN_DESC;
+	//DXGI_SWAP_CHAIN_DESC1;
+	//sc2->
 
-	frameLatencyWaitableObject = sc2->GetFrameLatencyWaitableObject();
-	if (frameLatencyWaitableObject == NULL)
+	if (scd.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
 	{
-		MessageBox(NULL, L"frame latency waitable object is null", NULL, MB_OK);
-		return false;
+		hr = sc2->SetMaximumFrameLatency(1);
+		if (FAILED(hr))
+		{
+			_com_error err(hr);
+			MessageBox(NULL, err.ErrorMessage(), NULL, MB_OK);
+			return false;
+		}
+
+		frameLatencyWaitableObject = sc2->GetFrameLatencyWaitableObject();
+		if (frameLatencyWaitableObject == NULL)
+		{
+			MessageBox(NULL, L"frame latency waitable object is null", NULL, MB_OK);
+			return false;
+		}
 	}
 	sc2->Release();
 
@@ -663,8 +840,8 @@ void InitGraphics()
 	// Flashing quads VBO
 	for (int row = 0; row < ARRAYSIZE(rows); ++row)
 	{
-		const int quad_size = 10.0f;
-		const int dquad_size = 2.0f * quad_size;
+		const FLOAT quad_size = 10.0f;
+		const FLOAT dquad_size = 2.0f * quad_size;
 		D3DXCOLOR row_color = colors[row % ARRAYSIZE(colors)];
 		VERTEX vertices[num_quads * vertices_per_quad];
 		for (int i = 0; i < num_quads; ++i)

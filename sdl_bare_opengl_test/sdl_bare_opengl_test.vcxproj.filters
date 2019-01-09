@@ -24,18 +24,30 @@
     <ClCompile Include="main_d3d11.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="perfcms.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sformat.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d3dkmthk.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="stb_image.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="d3dkmt_wait_for_veritcal_blank.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="cyclic_queue.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="perfcms.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sformat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="stb_image.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
