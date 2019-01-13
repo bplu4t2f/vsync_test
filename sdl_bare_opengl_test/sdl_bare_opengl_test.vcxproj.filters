@@ -30,6 +30,12 @@
     <ClCompile Include="sformat.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="main_d3d11_manual_vsync.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="main_d3d11_manual_vsync2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d3dkmthk.h">

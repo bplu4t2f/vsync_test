@@ -24,6 +24,8 @@ extern "C"
 }
 
 extern int main_d3d11();
+extern int main_d3d11_manual_vsync();
+extern int main_d3d11_manual_vsync2();
 
 static int main_opengl();
 // Should use D3D9 by default
@@ -323,13 +325,21 @@ int main_opengl()
 	bool enable_glFinish = false;
 	bool enableGlClientWaitSync = false;
 
+	bool capture_mouse = true;
+
+	const int REPAIR_NONE = 0;
+	const int REPAIR_SKIP_FLUSH = 1;
+	const int REPAIR_DOUBLE_FLUSH = 2;
+	int repair_state = REPAIR_NONE;
+
 	while (1)
 	{
 		bool glFinishOnce = false;
 		bool extraWait = false;
+		bool drop_one_flush = false;
 
 		mouse_x = (frame_counter * 8) % 800;
-		if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS)
+		if (capture_mouse && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
 		{
 			SDL_WarpMouseInWindow(window, mouse_x, 300);
 		}
@@ -411,6 +421,25 @@ int main_opengl()
 				else if (event.key.keysym.scancode == SDL_SCANCODE_W)
 				{
 					extraWait = true;
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_D)
+				{
+					Sleep(100);
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+				{
+					capture_mouse = !capture_mouse;
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_R)
+				{
+					if (repair_state == REPAIR_NONE)
+					{
+						repair_state = REPAIR_SKIP_FLUSH;
+					}
+				}
+				else if (event.key.keysym.scancode == SDL_SCANCODE_O)
+				{
+					drop_one_flush = true;
 				}
 			}
 		}
@@ -580,7 +609,7 @@ int main_opengl()
 			Uint64 after = SDL_GetPerformanceCounter();
 			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
 			double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
-			//if (frame_counter < 15)
+			if (frame_counter < 15 || elapsed_ms > 2.0)
 			{
 				printf("swap call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 			}
@@ -636,23 +665,32 @@ int main_opengl()
 				printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
 			}
 		}
-		if (enable_dwm_flush && !glFinishOnce)
+		if (!drop_one_flush && enable_dwm_flush && !glFinishOnce && repair_state != REPAIR_SKIP_FLUSH)
 		{
 			Uint64 sw = SDL_GetPerformanceCounter();
 			DwmFlush();
-			if (extraWait)
+			if (extraWait || repair_state == REPAIR_DOUBLE_FLUSH)
 			{
 				DwmFlush();
+				repair_state = REPAIR_NONE;
 			}
 			//vsyncThread(NULL);
 			Uint64 after = SDL_GetPerformanceCounter();
 			double elapsed_ms = (double)(after - sw) * 1000.0 / (double)performance_frequency;
 			double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
-			//if (frame_counter < 6000)
+			if (extraWait || elapsed_ms < 14.0)
 			{
 				printf("DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 				//printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
 			}
+		}
+		if (drop_one_flush)
+		{
+			printf("dropped one flush\n");
+		}
+		if (repair_state == REPAIR_SKIP_FLUSH)
+		{
+			repair_state = REPAIR_DOUBLE_FLUSH;
 		}
 #if 0
 		if (false)

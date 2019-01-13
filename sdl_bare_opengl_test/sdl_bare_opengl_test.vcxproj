@@ -127,6 +127,8 @@
     <ClCompile Include="d3dkmt_wait_for_vertical_blank.c" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="main_d3d11.cpp" />
+    <ClCompile Include="main_d3d11_manual_vsync.cpp" />
+    <ClCompile Include="main_d3d11_manual_vsync2.cpp" />
     <ClCompile Include="perfcms.cpp" />
     <ClCompile Include="sformat.cpp" />
   </ItemGroup>

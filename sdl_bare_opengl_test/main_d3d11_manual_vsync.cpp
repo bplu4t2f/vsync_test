@@ -16,17 +16,17 @@
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
 
-#pragma comment (lib, "d3d11.lib")
-#pragma comment (lib, "d3d10.lib")
+//#pragma comment (lib, "d3d11.lib")
+//#pragma comment (lib, "d3d10.lib")
 //#pragma comment (lib, "d3dx11.lib")
 //#pragma comment (lib, "d3dx10.lib")
-#pragma comment (lib, "dxgi.lib")
+//#pragma comment (lib, "dxgi.lib")
 //;
 static bool InitD3D(HWND hWnd);
 static void CleanD3D();
 static void RenderFrame(int mouse_x, int mouse_y, bool flash_background, int frame_counter);
-static void InitGraphics(void);
-static void InitPipeline(void);
+static void InitGraphics(void);    // creates the shape to render
+static void InitPipeline(void);    // loads and prepares the shaders
 
 extern "C"
 {
@@ -63,9 +63,9 @@ static HWND get_hwnd(SDL_Window *window)
 
 struct D3DXCOLOR
 {
-	D3DXCOLOR()	{}
+	D3DXCOLOR() {}
 	D3DXCOLOR(FLOAT r, FLOAT g, FLOAT b, FLOAT a = 1.0f)
-		: r(r), g(g), b(b), a(a) 
+		: r(r), g(g), b(b), a(a)
 	{}
 	FLOAT r, g, b, a;
 };
@@ -85,23 +85,7 @@ const int window_h = 600;
 
 static VERTEX OurVertices[3];
 
-struct Record
-{
-	DWM_TIMING_INFO timing_info;
-	DXGI_FRAME_STATISTICS frame_stats;
-	ULONGLONG dwm_diff;
-	ULONGLONG dwm_diffv;
-	ULONGLONG dx_diff;
-	ULONGLONG dwm_to_dx;
-	ULONGLONG dwmv_to_dx;
-};
-
-static Record records[9999];
-
-bool restart = false;
-bool restart_more = false;
-
-int main_d3d11()
+int main_d3d11_manual_vsync()
 {
 	Uint64 sw;
 
@@ -116,9 +100,6 @@ int main_d3d11()
 	}
 	printf("SDL_Init OK %lf\n", get_elapsed_ms(sw));
 
-__restart_more:
-	restart_more = false;
-
 	sw = SDL_GetPerformanceCounter();
 	SDL_Window *window = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_w, window_h, SDL_WINDOW_SHOWN);
 	if (window == NULL)
@@ -127,9 +108,6 @@ __restart_more:
 		return 1;
 	}
 	printf("SDL_CreateWindow OK %lf\n", get_elapsed_ms(sw));
-	
-__restart:
-	restart = false;
 
 	sw = SDL_GetPerformanceCounter();
 	if (!InitD3D(get_hwnd(window)))
@@ -144,7 +122,7 @@ __restart:
 	Uint64 last_tick = SDL_GetPerformanceCounter();
 	Uint64 performance_start = last_tick;
 
-	
+
 	bool held_down = false;
 
 	int mouse_x = 0, mouse_y = 0;
@@ -153,94 +131,25 @@ __restart:
 	bool flash_background = false;
 	bool wait_frame_latency_waitable_object = true;
 	bool present = true;
-	bool skip_next_wait = false;
-	int record_next_wait = 0;
-	bool wait_extra_next_time = false;
 	bool capture = true;
 
-	int wait_counter = 0;
 	int present_counter = 0;
 
 	bool one_dwm_flush = false;
-	int dwm_flush_protection = 0;
-	int dwm_flush_soon = 0;
 
 	while (1)
 	{
 		bool drop_a_few = false;
 		bool flush = false;
 
-		if (skip_next_wait)
-		{
-			skip_next_wait = false;
-			record_next_wait = 5;
-		}
-		else if (wait_frame_latency_waitable_object && frameLatencyWaitableObject != NULL)
-		{
-			int bleh = 0;
-
-			sw = SDL_GetPerformanceCounter();
-			DWORD result = WaitForSingleObjectEx(
-				frameLatencyWaitableObject,
-				1000, // 1 second timeout (shouldn't ever occur)
-				true
-			);
-			++wait_counter;
-			if (wait_extra_next_time)
-			{
-				wait_extra_next_time = false;
-				sw = SDL_GetPerformanceCounter();
-				DWORD result = WaitForSingleObjectEx(
-					frameLatencyWaitableObject,
-					1000, // 1 second timeout (shouldn't ever occur)
-					true
-				);
-				++wait_counter;
-				record_next_wait = 5;
-			}
-			//vsyncThread(NULL);
-			double waited = get_elapsed_ms(sw);
-
-			if (frame_counter < 15 || waited < 14.0 || waited > 18.0)
-			{
-				printf("%d waited for long %lf\n", frame_counter, waited);
-			}
-
-			//while (WaitForSingleObjectEx(frameLatencyWaitableObject, 0, true) == WAIT_OBJECT_0)
-			//{
-			//	++bleh;
-			//}
-			//if (bleh > 0)
-			//{
-			//	printf("bleh\n");
-			//	DWORD result = WaitForSingleObjectEx(
-			//		frameLatencyWaitableObject,
-			//		1000, // 1 second timeout (shouldn't ever occur)
-			//		true
-			//	);
-			//}
-
-			double elapsed_ms = get_elapsed_ms(sw);
-			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
-			if (record_next_wait > 0)
-			{
-				--record_next_wait;
-				printf("WaitForSingleObjectEx call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
-				//printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
-			}
-			if (bleh > 0)
-			{
-				printf("BLEH: %d\n", bleh);
-			}
-		}
-
+		
 		sw = SDL_GetPerformanceCounter();
 		mouse_x = (frame_counter * 8) % window_w;
 		if (capture && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
 		{
 			SDL_WarpMouseInWindow(window, mouse_x, window_h / 2);
 			double elapsed = get_elapsed_ms(sw);
-			if (elapsed > 20.0) {
+			if (elapsed > 1.0) {
 				printf("set mouse cursor bleh %lf\n", elapsed);
 			}
 		}
@@ -303,17 +212,9 @@ __restart:
 				{
 					goto _quit;
 				}
-				else if (event.key.keysym.scancode == SDL_SCANCODE_X)
-				{
-					skip_next_wait = true;
-				}
 				else if (event.key.keysym.scancode == SDL_SCANCODE_TAB)
 				{
 					printf("tab\n");
-				}
-				else if (event.key.keysym.scancode == SDL_SCANCODE_E)
-				{
-					wait_extra_next_time = true;
 				}
 				else if (event.key.keysym.scancode == SDL_SCANCODE_L)
 				{
@@ -364,16 +265,6 @@ __restart:
 				{
 					OutputDebugStringA("SCANCODE Z\n");
 				}
-				else if (event.key.keysym.scancode == SDL_SCANCODE_J)
-				{
-					restart = true;
-					goto _quit;
-				}
-				else if (event.key.keysym.scancode == SDL_SCANCODE_K)
-				{
-					restart_more = true;
-					goto _quit;
-				}
 				if (event.key.keysym.sym == 'z')
 				{
 					OutputDebugStringA("KEYCODE 'z'\n");
@@ -386,9 +277,9 @@ __restart:
 				printf("%d events %lf\n", frame_counter, elapsed);
 			}
 		}
-		
 
-		
+
+
 		++frame_counter;
 		//printf("frame: %d\r\n", frame_counter);
 
@@ -402,134 +293,32 @@ __restart:
 				printf("A %d : %.3lf\r\n", frame_counter, elapsed_ms);
 			}
 		}
-
-
-		int fc_mod4 = frame_counter % 4;
-		// "Divide-remainder" by the number of colored rects you want
-		int fc_mod8 = frame_counter % 8;
-
-
-#if 1
+		
 
 		RenderFrame(mouse_x, mouse_y, flash_background, frame_counter);
 
-		if (dwm_flush_soon > 0)
-		{
-			if (--dwm_flush_soon == 0)
-			{
-				one_dwm_flush = true;
-			}
-		}
-
-		//bool was_flushing = false;
+		
 		if (one_dwm_flush)
 		{
 			one_dwm_flush = false;
-			//was_flushing = true;
 			sw = SDL_GetPerformanceCounter();
 			DwmFlush();
-			//vsyncThread(NULL);
 			double elapsed_ms = get_elapsed_ms(sw);
 			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
 			//if (frame_counter < 6000)
-		
-		
+
+
 			printf("ONE DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 		}
 
-		static UINT last_present_count = 998789;
-		static UINT last_present_refresh_count = 9409588;
-
-		DXGI_FRAME_STATISTICS *frame_stats = &records[frame_counter].frame_stats;
-		swapchain->GetFrameStatistics(frame_stats);
-		DWM_TIMING_INFO *timing_info = &records[frame_counter].timing_info;
-		timing_info->cbSize = sizeof(DWM_TIMING_INFO);
-		DwmGetCompositionTimingInfo(NULL, timing_info);
-
-		if (frame_counter > 0)
-		{
-			records[frame_counter].dwm_diff = records[frame_counter].timing_info.qpcCompose - records[frame_counter - 1].timing_info.qpcCompose;
-			records[frame_counter].dwm_diffv = records[frame_counter].timing_info.qpcVBlank - records[frame_counter - 1].timing_info.qpcVBlank;
-			records[frame_counter].dx_diff = records[frame_counter].frame_stats.SyncQPCTime.QuadPart - records[frame_counter - 1].frame_stats.SyncQPCTime.QuadPart;
-		}
-		records[frame_counter].dwm_to_dx = records[frame_counter].timing_info.qpcCompose - records[frame_counter].frame_stats.SyncQPCTime.QuadPart;
-		records[frame_counter].dwmv_to_dx = records[frame_counter].timing_info.qpcVBlank - records[frame_counter].frame_stats.SyncQPCTime.QuadPart;
-
-		bool need_drop = records[frame_counter].dwm_to_dx > 100000;
-
-		if (need_drop && frame_counter % 60 == 0)
-		{
-			printf("%d need drop %llu\n", frame_counter, records[frame_counter].dwm_to_dx);
-		}
-
-		static int noticed_bug = 0;
-		
-		//printf("%d frame stats %u %u %u\n", frame_counter, frame_stats.PresentCount, frame_stats.PresentRefreshCount, frame_stats.SyncRefreshCount);
-		if (dwm_flush_protection == 0)
-		{
-			if (frame_counter > 5 && last_present_count == frame_stats->PresentCount)
-			{
-				if (noticed_bug == 0)
-				{
-					noticed_bug = frame_counter;
-				}
-				printf("%d we shouldn't be here %u %u\n", frame_counter, last_present_count, frame_stats->PresentCount);
-				//dwm_flush_soon = 16;
-				dwm_flush_protection = 20;
-				//wait_extra_next_time = true;
-			}
-			if (frame_counter > 5 && last_present_refresh_count + 1 != frame_stats->PresentRefreshCount)
-			{
-				if (noticed_bug == 0)
-				{
-					noticed_bug = frame_counter;
-				}
-				printf("%d we shouldn't be here2 %u %u\n", frame_counter, last_present_refresh_count, frame_stats->PresentRefreshCount);
-				//dwm_flush_soon = 16;
-				dwm_flush_protection = 20;
-				//wait_extra_next_time = true;
-			}
-		}
-		else
-		{
-			--dwm_flush_protection;
-		}
-
-		//if (one_dwm_flush)
-		//{
-		//	while (true)
-		//	{
-		//		DXGI_FRAME_STATISTICS frame_stats;
-		//		swapchain->GetFrameStatistics(&frame_stats);
-		//		if (frame_stats.PresentRefreshCount != last_present_refresh_count)
-		//		{
-		//			printf("it should have repaired itself again: %u\n", frame_stats.PresentRefreshCount);
-		//			break;
-		//		}
-		//	}
-		//	one_dwm_flush = false;
-		//}
-
-		last_present_count = frame_stats->PresentCount;
-		last_present_refresh_count = frame_stats->PresentRefreshCount;
-
-		if (frame_counter < 15) {
-			printf("%u %u\n", last_present_count, last_present_refresh_count);
-		}
 
 		if (present)
 		{
 			sw = SDL_GetPerformanceCounter();
-			HRESULT result = swapchain->Present(1, 0);
+			HRESULT result = swapchain->Present(0, 0);
 			if (FAILED(result))
 			{
 				printf("present failed %u\n", result);
-			}
-			UINT last_present_count;
-			swapchain->GetLastPresentCount(&last_present_count);
-			if (last_present_count != wait_counter)
-			{
-				printf("wtf\n");
 			}
 			double elapsed_ms = get_elapsed_ms(sw);
 			//double delay_to_vsync = (double)(after - last_vsync) * 1000.0 / (double)performance_frequency;
@@ -552,13 +341,38 @@ __restart:
 			//if (frame_counter < 6000)
 
 
-			//if (elapsed_ms < 15.0 || elapsed_ms > 18.0)
+			if (elapsed_ms < 15.0 || elapsed_ms > 18.0)
 			{
 				printf("DwmFlush call: %d, %.3lf\r\n", frame_counter, elapsed_ms);
 				//printf("delay to vsync: %d, %.4lf\r\n", frame_counter, delay_to_vsync);
 			}
 		}
-		//d3dkmt_wait_for_vertical_blank(&d3dkmtbleh);
+
+
+		static UINT last_present_count = 998789;
+		static UINT last_present_refresh_count = 9409588;
+
+		while (true)
+		{
+			DXGI_FRAME_STATISTICS frame_stats;
+			swapchain->GetFrameStatistics(&frame_stats);
+			double sync_ms = (double)frame_stats.SyncQPCTime.QuadPart / (double)SDL_GetPerformanceFrequency() * 1000.0;
+			printf("%d frame stats %u %u %u %.2lf\n", frame_counter, frame_stats.PresentCount, frame_stats.PresentRefreshCount, frame_stats.SyncRefreshCount, sync_ms);
+
+			if (last_present_refresh_count != frame_stats.PresentRefreshCount)
+			{
+				last_present_count = frame_stats.PresentCount;
+				last_present_refresh_count = frame_stats.PresentRefreshCount;
+				break;
+			}
+
+			Sleep(1);
+		}
+
+		//if (frame_counter < 15)
+		{
+			printf("%u %u\n", last_present_count, last_present_refresh_count);
+		}
 
 
 		if (drop_a_few)
@@ -570,27 +384,15 @@ __restart:
 		{
 			devcon->Flush();
 		}
-#endif
 	}
 
 _quit:
 
 	CleanD3D();
-	if (restart)
-	{
-		goto __restart;
-	}
-
 	SDL_DestroyWindow(window);
-
-	if (restart_more)
-	{
-		goto __restart_more;
-	}
-
 	SDL_Quit();
 
-	//getc(stdin);
+	getc(stdin);
 
 	return 0;
 }
@@ -614,7 +416,7 @@ bool InitD3D(HWND hWnd)
 	scd.SampleDesc.Count = 1;                              // how many multisamples
 	scd.Windowed = TRUE;                                   // windowed/full-screen mode
 	scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-	scd.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+	//scd.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
 	UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #if defined(_DEBUG)
@@ -754,7 +556,7 @@ bool InitD3D(HWND hWnd)
 	rd.FillMode = D3D11_FILL_SOLID;
 	rd.CullMode = D3D11_CULL_NONE;
 	rd.DepthClipEnable = TRUE;
-	
+
 	hr = dev->CreateRasterizerState(&rd, &rasterizerState);
 	if (FAILED(hr))
 	{
@@ -792,7 +594,9 @@ void CleanD3D()
 
 void RenderFrame(int mouse_x, int mouse_y, bool flash_background, int frame_counter)
 {
-	Uint64 sw = SDL_GetPerformanceCounter();
+	Uint64 sw;
+
+	sw = SDL_GetPerformanceCounter();
 	// set the render target as the back buffer
 	devcon->OMSetRenderTargets(1, &backbuffer, NULL);
 
@@ -847,7 +651,7 @@ void RenderFrame(int mouse_x, int mouse_y, bool flash_background, int frame_coun
 	D3D11_MAPPED_SUBRESOURCE ms;
 	devcon->Map(pVBuffer, NULL, D3D11_MAP_WRITE_DISCARD, NULL, &ms);    // map the buffer
 	memcpy(ms.pData, OurVertices, sizeof(OurVertices));                 // copy the data
-	devcon->Unmap(pVBuffer, NULL);
+	devcon->Unmap(pVBuffer, NULL);                                      // unmap the buffer
 
 	{
 		// select which vertex buffer to display
@@ -872,7 +676,7 @@ void RenderFrame(int mouse_x, int mouse_y, bool flash_background, int frame_coun
 void InitGraphics()
 {
 	// create a triangle using the VERTEX struct
-	
+
 	D3DXCOLOR colors[4] =
 	{
 		D3DXCOLOR(1.0f, 0.0f, 0.0f),
